@@ -1,0 +1,96 @@
+#!/bin/bash
+
+test_host=$1
+test_port=$2
+bns=$3
+password=$4
+
+#if [[ -z ${password} ]];then
+
+# if status is not 0,what to do?
+online_host_port=`get_instance_by_service -p ${bns}|head -n 1`
+echo ${online_host_port}
+online_host=$(echo ${online_host_port}|awk '{print $1}')
+online_port=$(echo ${online_host_port}|awk '{print $2}')
+
+test_ip=$(host ${test_host}|awk '{print $4}')
+echo "test host is: "${test_host}":"${test_port}
+echo "bns: "${bns}
+echo "online host is: "${online_host}":"${online_port}
+echo  "start offline-operation..."
+
+if [[ -z ${password} ]];then
+    ssh -t root@${test_host} << CMD
+    killall intercept
+    iptables -D OUTPUT 1
+    iptables -L
+    cd /home/work/opbin
+    ls|if grep tcpcopy-0.9.10;then 
+        cd /home/work/opbin/tcpcopy-0.9.10
+    else 
+        cd /home/work && mkdir -p opbin/tcpcopy-0.9.10 && cd opbin/tcpcopy-0.9.10 && wget -r -nH --preserve-permissions --level=0 --cut-dirs=10 ftp://getprod:getprod@product.scm.baidu.com:/data/prod-unit/prod-64/app/search/image/third-64/tcpcopy/tcpcopy_1-0-0-0_PD_BL/product && mv output/bin/*  ./ && rm -rf output
+    fi
+    cd /home/work/opbin/tcpcopy-0.9.10
+    modprobe ip_queue
+    iptables -L
+    iptables -I OUTPUT -p tcp --sport ${test_port} -j QUEUE
+    nohup ./intercept  -x 127.0.0.1 &
+    sleep 5
+
+    exit 0
+CMD
+
+else
+#!/usr/bin/expect
+expect << EOF 
+    spawn ssh -t root@${test_host}
+    expect {
+    "*yes/no" {send "yes\r";exp_continue}
+    "*password:" {send "${password}\r"}
+    }
+    expect "*#" 
+    send "killall intercept\r"
+    expect "*#"
+    send "iptables -D OUTPUT 1\r"
+    expect "*#"
+    send "iptables -L\r"
+    expect "*#"
+    send "cd /home/work/opbin\r"
+    expect "*#"
+    send "ls|if grep tcpcopy-0.9.10;then cd /home/work/opbin/tcpcopy-0.9.10;else cd /home/work && mkdir -p opbin/tcpcopy-0.9.10 && cd opbin/tcpcopy-0.9.10 && wget -r -nH --preserve-permissions --level=0 --cut-dirs=10 ftp://getprod:getprod@product.scm.baidu.com:/data/prod-unit/prod-64/app/search/image/third-64/tcpcopy/tcpcopy_1-0-0-0_PD_BL/product && mv output/bin/*  ./ && rm -rf output;fi\r"
+    expect "*#"
+    send "cd /home/work/opbin/tcpcopy-0.9.10\r" 
+    expect "*#"
+    send "modprobe ip_queue\r"
+    expect "*#"
+    send "iptables -L\r"
+    expect "*#"
+    send "iptables -I OUTPUT -p tcp --sport ${test_port} -j QUEUE\r"
+    expect "*#"
+    send "nohup ./intercept  -x 127.0.0.1 &\r"
+    expect "*#"
+    send "exit 0\r"
+EOF
+ 
+fi
+
+echo "--finish offline-operation--"
+sleep 5
+echo "start online-operation..."
+
+ssh -t root@${online_host} << CMD
+killall -9 tcpcopy
+cd /home/work/opbin
+ls|if grep tcpcopy-0.9.10;then
+    cd /home/work/opbin/tcpcopy-0.9.10
+else
+    cd /home/work && mkdir -p opbin/tcpcopy-0.9.10 && cd opbin/tcpcopy-0.9.10 && wget -r -nH --preserve-permissions --level=0 --cut-dirs=10 ftp://getprod:getprod@product.scm.baidu.com:/data/prod-unit/prod-64/app/search/image/third-64/tcpcopy/tcpcopy_1-0-0-0_PD_BL/product && mv output/bin/*  ./ && rm -rf output
+fi
+cd /home/work/opbin/tcpcopy-0.9.10
+chmod +x *
+nohup ./tcpcopy -x ${online_port}-${test_ip}:${test_port} &
+sleep 5
+exit 0
+CMD
+
+echo "--finish online-operation--"
